@@ -41,6 +41,8 @@ typedef unsigned short int celltype;
 
 void my_swap(celltype** a, celltype** b);
 
+void show_univ(celltype** univ, size_t nrows, size_t ncols);
+
 /** Play one tick of a game of life serially with given array of known number
  *  of rows and columns. Assumed that rows wrap around, but first and last
  *  rows are ghosted.
@@ -54,6 +56,8 @@ void play_gol(celltype** univ, size_t nrows, size_t ncols);
 int main(int argc, char *argv[])
 {
 //    int i = 0;
+  size_t nrows = 8, ncols = 8, i, j;
+  celltype **univ;
   celltype *a, *b;
   a = (celltype *) malloc(3 * sizeof(celltype));
   b = (celltype *) malloc(3 * sizeof(celltype));
@@ -79,6 +83,36 @@ int main(int argc, char *argv[])
     
 // Insert your code
     if (0 == mpi_myrank) {
+      /* To reiterate: 2 ghosted rows */
+      univ  = (celltype **)malloc(sizeof(celltype *) *(nrows+2));
+      univ[0] = (celltype *)malloc(sizeof(celltype) * ncols *(nrows+2));
+ 
+      for(i = 0; i < (nrows+2); i++) {
+	univ[i] = (*univ + ncols * i);
+	for (j = 0; j < ncols; ++j) {
+	  univ[i][j] = DEAD;
+	}
+      }
+
+      univ[2][2] = ALIVE;
+      univ[3][3] = ALIVE;
+      univ[4][1] = ALIVE;
+      univ[4][2] = ALIVE;
+      univ[4][3] = ALIVE;
+
+      size_t tick;
+      for (tick = 0; tick < 32; ++tick) {
+	show_univ(univ, nrows, ncols);
+	/* TODO: perform ghosting */
+	for (j = 0; j < ncols; ++j) {
+	  univ[0][j] = univ[nrows][j];
+	  univ[nrows+1][j] = univ[1][j];
+	}
+	/* TODO: play one tick */
+	play_gol(univ, nrows, ncols);
+      }
+
+
       printf("preswap, a is {%d, %d, %d}\n", a[0], a[1], a[2]);
       printf("preswap, b is {%d, %d, %d}\n", b[0], b[1], b[2]);
       my_swap(&a, &b);
@@ -97,6 +131,19 @@ int main(int argc, char *argv[])
 /***************************************************************************/
 /* Other Functions - You write as part of the assignment********************/
 /***************************************************************************/
+
+void show_univ(celltype** univ, size_t nrows, size_t ncols)
+{
+  size_t i, j;
+  printf("================================\n");
+  for (i = 1; i <= nrows; ++i) {
+    for (j = 0; j < ncols; ++j) {
+      printf("%d", univ[i][j]);
+    }
+    printf("\n");
+  }
+  printf("================================\n");
+}
 
 void my_swap(celltype** a, celltype** b) {
   celltype* temp = *a;
