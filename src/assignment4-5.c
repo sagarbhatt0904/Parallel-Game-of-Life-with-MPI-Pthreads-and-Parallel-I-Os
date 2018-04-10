@@ -41,7 +41,7 @@ typedef unsigned short int celltype;
 
 void my_swap(celltype** a, celltype** b);
 
-void show_univ(celltype** univ, size_t nrows, size_t ncols);
+void fprint_univ(FILE* out_file, celltype** univ, size_t nrows, size_t ncols);
 
 /** Play one tick of a game of life serially with given array of known number
  *  of rows and columns. Assumed that rows wrap around, but first and last
@@ -50,7 +50,7 @@ void show_univ(celltype** univ, size_t nrows, size_t ncols);
 void play_gol(celltype** univ, size_t nrows, size_t ncols);
 
 /** Play one tick of the game of life using MPI */
-void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols);
+void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick);
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -61,30 +61,37 @@ int main(int argc, char *argv[])
 //    int i = 0;
   size_t nrows = 8, ncols = 8, i, j;
   celltype **univ;
+  FILE *out_file = NULL;
+  char out_filename[16];
     int mpi_myrank;
     int mpi_commsize;
 // Example MPI startup and using CLCG4 RNG
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
-    
+
 // Init 16,384 RNG streams - each rank has an independent stream
     InitDefault();
-    
+
 // Note, used the mpi_myrank to select which RNG stream to use.
 // You must replace mpi_myrank with the right row being used.
-// This just show you how to call the RNG.    
-    printf("Rank %d of %d has been started and a first Random Value of %lf\n", 
+// This just show you how to call the RNG.
+    printf("Rank %d of %d has been started and a first Random Value of %lf\n",
 	   mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
-    
+
     MPI_Barrier( MPI_COMM_WORLD );
-    
+
 // Insert your code
     if (1) {
+      sprintf(out_filename, "out_rank_%d", mpi_myrank);
+      if ((out_file = fopen(out_filename, "w")) == NULL) {
+	printf("Failed to open output file: %s.\n", out_filename);
+      }
+
       /* To reiterate: 2 ghosted rows */
       univ  = (celltype **)malloc(sizeof(celltype *) *(nrows+2));
       univ[0] = (celltype *)malloc(sizeof(celltype) * ncols *(nrows+2));
- 
+
       for(i = 0; i < (nrows+2); i++) {
 	univ[i] = (*univ + ncols * i);
 	for (j = 0; j < ncols; ++j) {
@@ -102,22 +109,23 @@ int main(int argc, char *argv[])
 
       size_t tick;
       for (tick = 0; tick < 32; ++tick) {
-	printf("Rank %d, tick %ld:\n", mpi_myrank, tick);
-	show_univ(univ, nrows, ncols);
+	fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, tick);
+	fprint_univ(out_file, univ, nrows, ncols);
         /* /\* TODO: perform ghosting *\/ */
         /* for (j = 0; j < ncols; ++j) { */
         /*   univ[0][j] = univ[nrows][j]; */
         /*   univ[nrows+1][j] = univ[1][j]; */
         /* } */
 	/* TODO: play one tick */
-	play_gol_mpi(univ, nrows, ncols);
+	play_gol_mpi(univ, nrows, ncols, tick);
       }
-    } 
+    }
 
 // END -Perform a barrier and then leave MPI
     MPI_Barrier( MPI_COMM_WORLD );
     free(univ[0]);
     free(univ);
+    fclose(out_file);
     MPI_Finalize();
     return 0;
 }
@@ -126,17 +134,17 @@ int main(int argc, char *argv[])
 /* Other Functions - You write as part of the assignment********************/
 /***************************************************************************/
 
-void show_univ(celltype** univ, size_t nrows, size_t ncols)
+void fprint_univ(FILE* out_file, celltype** univ, size_t nrows, size_t ncols)
 {
   size_t i, j;
-  printf("================================\n");
+  fprintf(out_file, "================================\n");
   for (i = 1; i <= nrows; ++i) {
     for (j = 0; j < ncols; ++j) {
-      printf("%d", univ[i][j]);
+      fprintf(out_file, "%d", univ[i][j]);
     }
-    printf("\n");
+    fprintf(out_file, "\n");
   }
-  printf("================================\n");
+  fprintf(out_file, "================================\n");
 }
 
 void my_swap(celltype** a, celltype** b) {
@@ -173,7 +181,7 @@ void play_gol(celltype** univ, size_t nrows, size_t ncols)
 	univ[i+1][j] = ALIVE;
 	break;
       default:
-	/* Dead, either by underpopulation (0--1 nbs) or overpopulation 
+	/* Dead, either by underpopulation (0--1 nbs) or overpopulation
 	   (4--8 nbs) */
 	univ[i+1][j] = DEAD;
 	break;
@@ -187,7 +195,7 @@ void play_gol(celltype** univ, size_t nrows, size_t ncols)
   free(lastrow);
 }
 
-void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols)
+void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick)
 {
   int mpi_myrank, mpi_commsize;
   /* up/down refers to direction of message */
@@ -195,7 +203,7 @@ void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols)
     send_req_up, send_req_down;
   MPI_Status recv_status_up, recv_status_down,
     send_status_up, send_status_down;
-  int up_tag = 50, down_tag=51;
+  int up_tag = 2*tick, down_tag = 2*tick+1;
   int rank_above, rank_below;
 
   MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
