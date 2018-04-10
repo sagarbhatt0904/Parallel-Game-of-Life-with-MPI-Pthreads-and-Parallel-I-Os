@@ -49,6 +49,9 @@ void show_univ(celltype** univ, size_t nrows, size_t ncols);
  */
 void play_gol(celltype** univ, size_t nrows, size_t ncols);
 
+/** Play one tick of the game of life using MPI */
+void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols);
+
 /***************************************************************************/
 /* Function: Main **********************************************************/
 /***************************************************************************/
@@ -58,11 +61,6 @@ int main(int argc, char *argv[])
 //    int i = 0;
   size_t nrows = 8, ncols = 8, i, j;
   celltype **univ;
-  celltype *a, *b;
-  a = (celltype *) malloc(3 * sizeof(celltype));
-  b = (celltype *) malloc(3 * sizeof(celltype));
-  a[0] = 1; a[1] = 2; a[2] = 3;
-  b[0] = 4; b[1] = 5; b[2] = 6;
     int mpi_myrank;
     int mpi_commsize;
 // Example MPI startup and using CLCG4 RNG
@@ -82,7 +80,7 @@ int main(int argc, char *argv[])
     MPI_Barrier( MPI_COMM_WORLD );
     
 // Insert your code
-    if (0 == mpi_myrank) {
+    if (1) {
       /* To reiterate: 2 ghosted rows */
       univ  = (celltype **)malloc(sizeof(celltype *) *(nrows+2));
       univ[0] = (celltype *)malloc(sizeof(celltype) * ncols *(nrows+2));
@@ -94,36 +92,32 @@ int main(int argc, char *argv[])
 	}
       }
 
-      univ[2][2] = ALIVE;
-      univ[3][3] = ALIVE;
-      univ[4][1] = ALIVE;
-      univ[4][2] = ALIVE;
-      univ[4][3] = ALIVE;
+      if (0 == mpi_myrank) {
+	univ[2][2] = ALIVE;
+	univ[3][3] = ALIVE;
+	univ[4][1] = ALIVE;
+	univ[4][2] = ALIVE;
+	univ[4][3] = ALIVE;
+      }
 
       size_t tick;
       for (tick = 0; tick < 32; ++tick) {
+	printf("Rank %d, tick %ld:\n", mpi_myrank, tick);
 	show_univ(univ, nrows, ncols);
-	/* TODO: perform ghosting */
-	for (j = 0; j < ncols; ++j) {
-	  univ[0][j] = univ[nrows][j];
-	  univ[nrows+1][j] = univ[1][j];
-	}
+        /* /\* TODO: perform ghosting *\/ */
+        /* for (j = 0; j < ncols; ++j) { */
+        /*   univ[0][j] = univ[nrows][j]; */
+        /*   univ[nrows+1][j] = univ[1][j]; */
+        /* } */
 	/* TODO: play one tick */
-	play_gol(univ, nrows, ncols);
+	play_gol_mpi(univ, nrows, ncols);
       }
-
-
-      printf("preswap, a is {%d, %d, %d}\n", a[0], a[1], a[2]);
-      printf("preswap, b is {%d, %d, %d}\n", b[0], b[1], b[2]);
-      my_swap(&a, &b);
-      printf("swapped, a is {%d, %d, %d}\n", a[0], a[1], a[2]);
-      printf("swapped, b is {%d, %d, %d}\n", b[0], b[1], b[2]);
     } 
 
 // END -Perform a barrier and then leave MPI
     MPI_Barrier( MPI_COMM_WORLD );
-    free(a);
-    free(b);
+    free(univ[0]);
+    free(univ);
     MPI_Finalize();
     return 0;
 }
@@ -191,4 +185,46 @@ void play_gol(celltype** univ, size_t nrows, size_t ncols)
 
   free(rowbackup);
   free(lastrow);
+}
+
+void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols)
+{
+  int mpi_myrank, mpi_commsize;
+  /* up/down refers to direction of message */
+  MPI_Request recv_req_up, recv_req_down,
+    send_req_up, send_req_down;
+  MPI_Status recv_status_up, recv_status_down,
+    send_status_up, send_status_down;
+  int up_tag = 50, down_tag=51;
+  int rank_above, rank_below;
+
+  MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
+  MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
+
+  /* Simply (mpi_myrank-1)%mpi_commsize gives -1 for rank 0.
+     Even GDB can't help! */
+  rank_above = (mpi_myrank+mpi_commsize-1)%mpi_commsize;
+  rank_below = (mpi_myrank+1)%mpi_commsize;
+  /* TODO: Request ghosts */
+  MPI_Irecv(univ[nrows+1], ncols, MPI_UNSIGNED_SHORT,
+	    rank_below, up_tag, MPI_COMM_WORLD,
+	    &recv_req_up);
+  MPI_Irecv(univ[0], ncols, MPI_UNSIGNED_SHORT,
+	    rank_above, down_tag, MPI_COMM_WORLD,
+	    &recv_req_down);
+
+  /* TODO: Send shosts */
+  MPI_Isend(univ[1], ncols, MPI_UNSIGNED_SHORT,
+	    rank_above, up_tag, MPI_COMM_WORLD,
+	    &send_req_up);
+  MPI_Isend(univ[nrows], ncols, MPI_UNSIGNED_SHORT,
+	    rank_below, down_tag, MPI_COMM_WORLD,
+	    &send_req_down);
+
+  /* TODO: Play the game */
+  MPI_Wait(&recv_req_up, &recv_status_up);
+  MPI_Wait(&recv_req_down, &recv_status_down);
+  MPI_Wait(&send_req_up, &send_status_up);
+  MPI_Wait(&send_req_down, &send_status_down);
+  play_gol(univ, nrows, ncols);
 }
