@@ -41,7 +41,9 @@ typedef unsigned short int celltype;
 
 void my_swap(celltype** a, celltype** b);
 
-void fprint_univ(FILE* out_file, celltype** univ, size_t nrows, size_t ncols);
+void fprint_self(FILE* out_file, celltype** univ, size_t nrows, size_t ncols);
+
+void fprint_univ(MPI_File out_file, celltype** univ, size_t nrows, size_t ncols);
 
 /** Play one tick of a game of life serially with given array of known number
  *  of rows and columns. Assumed that rows wrap around, but first and last
@@ -59,9 +61,10 @@ void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick);
 int main(int argc, char *argv[])
 {
 //    int i = 0;
-  size_t nrows = 8, ncols = 8, i, j;
+  size_t nrows = 8, ncols = 16, i, j;
   celltype **univ;
   FILE *out_file = NULL;
+  MPI_File mpi_out_fh;
   char out_filename[16];
     int mpi_myrank;
     int mpi_commsize;
@@ -69,6 +72,10 @@ int main(int argc, char *argv[])
     MPI_Init( &argc, &argv);
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
+
+    MPI_File_open(MPI_COMM_WORLD, "out_all",
+		  MPI_MODE_CREATE | MPI_MODE_WRONLY,
+		  MPI_INFO_NULL, &mpi_out_fh);
 
 // Init 16,384 RNG streams - each rank has an independent stream
     InitDefault();
@@ -110,7 +117,7 @@ int main(int argc, char *argv[])
       size_t tick;
       for (tick = 0; tick < 32; ++tick) {
 	fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, tick);
-	fprint_univ(out_file, univ, nrows, ncols);
+	fprint_self(out_file, univ, nrows, ncols);
         /* /\* TODO: perform ghosting *\/ */
         /* for (j = 0; j < ncols; ++j) { */
         /*   univ[0][j] = univ[nrows][j]; */
@@ -119,6 +126,10 @@ int main(int argc, char *argv[])
 	/* TODO: play one tick */
 	play_gol_mpi(univ, nrows, ncols, tick);
       }
+
+      fprint_univ(mpi_out_fh, univ, nrows, ncols);
+      fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, tick);
+      fprint_self(out_file, univ, nrows, ncols);
     }
 
 // END -Perform a barrier and then leave MPI
@@ -134,7 +145,7 @@ int main(int argc, char *argv[])
 /* Other Functions - You write as part of the assignment********************/
 /***************************************************************************/
 
-void fprint_univ(FILE* out_file, celltype** univ, size_t nrows, size_t ncols)
+void fprint_self(FILE* out_file, celltype** univ, size_t nrows, size_t ncols)
 {
   size_t i, j;
   fprintf(out_file, "================================\n");
@@ -145,6 +156,18 @@ void fprint_univ(FILE* out_file, celltype** univ, size_t nrows, size_t ncols)
     fprintf(out_file, "\n");
   }
   fprintf(out_file, "================================\n");
+}
+
+void fprint_univ(MPI_File out_file, celltype** univ, size_t nrows, size_t ncols)
+{
+  /* size_t i, j; */
+    int mpi_myrank;
+    int mpi_commsize;
+    MPI_Status status;
+    MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
+    MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
+    /* Note: univ[1] because of the ghost row */
+    MPI_File_write_at(out_file, mpi_myrank * nrows * ncols * sizeof(celltype), univ[1], nrows * ncols, MPI_UNSIGNED_SHORT, &status);
 }
 
 void my_swap(celltype** a, celltype** b) {
