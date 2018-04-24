@@ -311,3 +311,22 @@ void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick)
   MPI_Wait(&send_req_down, &send_status_down);
   play_gol(univ, nrows, ncols);
 }
+
+void contour(FILE* file1, celltype** univ, int Nx, int Ny, size_t tick, char* str)
+{
+  sprintf(str,"out_%ld.dat",tick);
+  file1=fopen(str,"w");
+    fprintf(file1,"TITLE= GOL\n");
+    fprintf(file1,"VARIABLES=X,Y,A\n");
+    fprintf(file1,"ZONE I=%d, J=%d, F=POINT\n",Nx,Ny);
+
+    for(int j=0; j<Ny; j++)
+    {
+        for(int i=0; i<Nx; i++)
+        {
+
+            fprintf(file1,"%d %d %d \n", i, j, data1.univ[i][j]);
+        }
+    }
+    fclose(file1);
+}
