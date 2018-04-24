@@ -24,7 +24,9 @@
 
 #define ALIVE 1
 #define DEAD  0
+#define UNIV_EDGE_SIZE 32
 #define CELLS_PER_PIXEL 4
+#define RAND_THRESH 0.25
 typedef unsigned short int celltype;
 typedef unsigned short int pixel_t;
 
@@ -67,9 +69,10 @@ void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick);
 int main(int argc, char *argv[])
 {
 //    int i = 0;
-  size_t nrows = 8, ncols = 16, i, j;
-  size_t nirows = nrows / CELLS_PER_PIXEL;
-  size_t nicols = ncols / CELLS_PER_PIXEL;
+  size_t nrows, ncols, i, j;
+  size_t nirows;
+  size_t nicols;
+  size_t tick;
   celltype **univ;
   pixel_t **img;
   FILE *out_file = NULL;
@@ -84,13 +87,18 @@ int main(int argc, char *argv[])
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
 
+    nrows = UNIV_EDGE_SIZE / mpi_commsize;
+    ncols = UNIV_EDGE_SIZE;
+    nirows = nrows / CELLS_PER_PIXEL;
+    nicols = ncols / CELLS_PER_PIXEL;
+
     MPI_File_open(MPI_COMM_WORLD, "out_all",
-		  MPI_MODE_CREATE | MPI_MODE_WRONLY,
-		  MPI_INFO_NULL, &mpi_out_fh);
+                  MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                  MPI_INFO_NULL, &mpi_out_fh);
 
     MPI_File_open(MPI_COMM_WORLD, "out_all_img",
-		  MPI_MODE_CREATE | MPI_MODE_WRONLY,
-		  MPI_INFO_NULL, &mpi_img_fh);
+                  MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                  MPI_INFO_NULL, &mpi_img_fh);
 
 // Init 16,384 RNG streams - each rank has an independent stream
     InitDefault();
@@ -98,8 +106,6 @@ int main(int argc, char *argv[])
 // Note, used the mpi_myrank to select which RNG stream to use.
 // You must replace mpi_myrank with the right row being used.
 // This just show you how to call the RNG.
-    printf("Rank %d of %d has been started and a first Random Value of %lf\n",
-	   mpi_myrank, mpi_commsize, GenVal(mpi_myrank));
 
     MPI_Barrier( MPI_COMM_WORLD );
 
@@ -114,13 +120,8 @@ int main(int argc, char *argv[])
       univ  = (celltype **)malloc(sizeof(celltype *) *(nrows+2));
       univ[0] = (celltype *)malloc(sizeof(celltype) * ncols *(nrows+2));
 
-      /* Defining initial state */
-      /* TODO: Randomize */
       for(i = 0; i < (nrows+2); i++) {
 	univ[i] = (*univ + ncols * i);
-	for (j = 0; j < ncols; ++j) {
-	  univ[i][j] = DEAD;
-	}
       }
 
       img = (pixel_t **) malloc(sizeof(pixel_t *) * (nirows+2));
@@ -130,15 +131,14 @@ int main(int argc, char *argv[])
 	img[i] = (*img + nicols * i);
       }
 
-      if (0 == mpi_myrank) {
-	univ[2][2] = ALIVE;
-	univ[3][3] = ALIVE;
-	univ[4][1] = ALIVE;
-	univ[4][2] = ALIVE;
-	univ[4][3] = ALIVE;
+      /* Defining initial state */
+      /* TODO: Randomize */
+      for (i = 0; i < nrows; ++i) {
+	for (j = 0; j < ncols; ++j) {
+	  univ[i+1][j] = (GenVal(i) < 0.5) ? DEAD : ALIVE;
+	}
       }
 
-      size_t tick;
       for (tick = 0; tick < 32; ++tick) {
 	fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, tick);
 	fprint_self(out_file, univ, nrows, ncols);
@@ -158,6 +158,8 @@ int main(int argc, char *argv[])
     free(univ[0]);
     free(univ);
     fclose(out_file);
+    MPI_File_close(&mpi_out_fh);
+    MPI_File_close(&mpi_img_fh);
     MPI_Finalize();
     return 0;
 }
