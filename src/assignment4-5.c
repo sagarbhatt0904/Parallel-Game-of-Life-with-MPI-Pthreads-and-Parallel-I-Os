@@ -44,6 +44,7 @@ struct datapack {
   size_t tid;
   size_t nrows;
   size_t ncols;
+  int mpi_myrank;
 };
 // You define these
 
@@ -75,7 +76,7 @@ void* play_gol_pthreads(void *data);
  *  rows are ghosted.
  */
 void play_gol(celltype** univ, size_t nrows, size_t ncols);
-void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols);
+void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols, size_t my_start_row);
 
 /** Play one tick of the game of life using MPI */
 void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncols, size_t tick);
@@ -169,7 +170,7 @@ int main(int argc, char *argv[])
 	fprint_self(out_file, univ, nrows, ncols);
 	/* TODO: play one tick */
 	do_ghosting(univ, nrows, ncols, tick);
-	play_gol_2(univ, univ_new, nrows, ncols);
+	play_gol_2(univ, univ_new, nrows, ncols, mpi_myrank * nrows);
 	my_swap_2d(&univ, &univ_new);
       }
 
@@ -263,12 +264,15 @@ void fprint_pixels(MPI_File out_file, pixel_t** img, size_t nrows, size_t ncols)
     MPI_File_write_at(out_file, mpi_myrank * nrows * ncols * sizeof(pixel_t), img[0], nrows * ncols, MPI_UNSIGNED_SHORT, &status);
 }
 
-void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols)
+void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols, size_t my_start_row)
 {
   size_t i, j;
   celltype sum;
   for (i = 0; i < nrows; ++i) {
     for (j = 0; j < ncols; ++j) {
+      if (GenVal(my_start_row + i) < RAND_THRESH) {
+	univ_new[i+1][j] = (GenVal(my_start_row + i) < 0.5) ? DEAD : ALIVE;
+      }
       sum = (univ[i][(j+ncols-1)%ncols] + univ[i][j] + univ[i][(j+1)%ncols] +
 	     univ[i + 1][(j+ncols-1) % ncols] + univ[i + 1][(j+1) % ncols] +
 	     univ[i + 2][(j+ncols-1) % ncols] + univ[i + 2][j] + univ[i + 2][(j+1) % ncols]);
@@ -337,20 +341,27 @@ void* play_gol_pthreads(void *data)
 {
   struct datapack* data1 = (struct datapack *) data;
   size_t i;
+  size_t ntrows = data1->nrows / NUM_THREADS;
+  size_t start_row = ntrows * data1->tid;
+  size_t true_start_row = data1->nrows * data1->mpi_myrank + start_row;
   /* Thread is started. Go into ticks */
   for (i = 0; i < NTICKS; ++i) {
     if (0 == data1->tid) {
       /* TODO: Do all the ghosting broughaha */
+      do_ghosting(data1->univ, data1->nrows, data1->ncols, i);
     }
     pthread_barrier_wait(&(data1->barrier));
-    play_gol_2(data1->univ, data1->univ_new, data1->nrows, data1->ncols);
+    play_gol_2(&(data1->univ[start_row]), &(data1->univ_new[start_row]), ntrows, data1->ncols, true_start_row);
     pthread_barrier_wait(&(data1->barrier));
+    if (0 == data1->tid) {
+      my_swap_2d(&(data1->univ), &(data1->univ_new));
+    }
   }
 
   return NULL;
 }
 
-void do_ghosting(celltype**univ, size_t nrows, size_t ncols, size_t tick)
+void do_ghosting(celltype **univ, size_t nrows, size_t ncols, size_t tick)
 {
   int mpi_myrank, mpi_commsize;
   /* up/down refers to direction of message */
@@ -430,5 +441,5 @@ void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncol
   MPI_Wait(&recv_req_down, &recv_status_down);
   MPI_Wait(&send_req_up, &send_status_up);
   MPI_Wait(&send_req_down, &send_status_down);
-  play_gol_2(univ, univ_new, nrows, ncols);
+  play_gol_2(univ, univ_new, nrows, ncols, mpi_myrank*nrows);
 }
