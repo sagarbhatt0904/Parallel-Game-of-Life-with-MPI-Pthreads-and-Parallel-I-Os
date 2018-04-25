@@ -66,6 +66,8 @@ void fprint_univ(MPI_File out_file, celltype** univ, size_t nrows, size_t ncols)
 
 void fprint_pixels(MPI_File out_file, pixel_t** img, size_t nrows, size_t ncols);
 
+void do_ghosting(celltype**univ, size_t nrows, size_t ncols, size_t tick);
+
 void* play_gol_pthreads(void *data);
 
 /** Play one tick of a game of life serially with given array of known number
@@ -166,7 +168,8 @@ int main(int argc, char *argv[])
 	fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, tick);
 	fprint_self(out_file, univ, nrows, ncols);
 	/* TODO: play one tick */
-	play_gol_mpi(univ, univ_new, nrows, ncols, tick);
+	do_ghosting(univ, nrows, ncols, tick);
+	play_gol_2(univ, univ_new, nrows, ncols);
 	my_swap_2d(&univ, &univ_new);
       }
 
@@ -340,11 +343,52 @@ void* play_gol_pthreads(void *data)
       /* TODO: Do all the ghosting broughaha */
     }
     pthread_barrier_wait(&(data1->barrier));
-    play_gol(data1->univ, data1->nrows, data1->ncols);
+    play_gol_2(data1->univ, data1->univ_new, data1->nrows, data1->ncols);
     pthread_barrier_wait(&(data1->barrier));
   }
 
   return NULL;
+}
+
+void do_ghosting(celltype**univ, size_t nrows, size_t ncols, size_t tick)
+{
+  int mpi_myrank, mpi_commsize;
+  /* up/down refers to direction of message */
+  MPI_Request recv_req_up, recv_req_down,
+    send_req_up, send_req_down;
+  MPI_Status recv_status_up, recv_status_down,
+    send_status_up, send_status_down;
+  int up_tag = 2*tick, down_tag = 2*tick+1;
+  int rank_above, rank_below;
+
+  MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
+  MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
+
+  /* Simply (mpi_myrank-1)%mpi_commsize gives -1 for rank 0.
+     Even GDB can't help! */
+  rank_above = (mpi_myrank+mpi_commsize-1)%mpi_commsize;
+  rank_below = (mpi_myrank+1)%mpi_commsize;
+  /* TODO: Request ghosts */
+  MPI_Irecv(univ[nrows+1], ncols, MPI_UNSIGNED_SHORT,
+	    rank_below, up_tag, MPI_COMM_WORLD,
+	    &recv_req_up);
+  MPI_Irecv(univ[0], ncols, MPI_UNSIGNED_SHORT,
+	    rank_above, down_tag, MPI_COMM_WORLD,
+	    &recv_req_down);
+
+  /* TODO: Send shosts */
+  MPI_Isend(univ[1], ncols, MPI_UNSIGNED_SHORT,
+	    rank_above, up_tag, MPI_COMM_WORLD,
+	    &send_req_up);
+  MPI_Isend(univ[nrows], ncols, MPI_UNSIGNED_SHORT,
+	    rank_below, down_tag, MPI_COMM_WORLD,
+	    &send_req_down);
+
+  /* TODO: Play the game */
+  MPI_Wait(&recv_req_up, &recv_status_up);
+  MPI_Wait(&recv_req_down, &recv_status_down);
+  MPI_Wait(&send_req_up, &send_status_up);
+  MPI_Wait(&send_req_down, &send_status_down);
 }
 
 void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncols, size_t tick)
