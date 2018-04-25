@@ -16,6 +16,7 @@
 #include<clcg4.h>
 
 #include<mpi.h>
+#include<pthread.h>
 
 
 /***************************************************************************/
@@ -24,9 +25,11 @@
 
 #define ALIVE 1
 #define DEAD  0
+#define NTICKS 32
 #define UNIV_EDGE_SIZE 32
 #define CELLS_PER_PIXEL 4
 #define RAND_THRESH 0.25
+#define NUM_THREADS 2
 typedef unsigned short int celltype;
 typedef unsigned short int pixel_t;
 
@@ -34,6 +37,14 @@ typedef unsigned short int pixel_t;
 /* Global Vars *************************************************************/
 /***************************************************************************/
 
+struct datapack {
+  celltype** univ;
+  celltype** univ_new;
+  pthread_barrier_t barrier;
+  size_t tid;
+  size_t nrows;
+  size_t ncols;
+};
 // You define these
 
 
@@ -45,6 +56,8 @@ typedef unsigned short int pixel_t;
 
 void my_swap(celltype** a, celltype** b);
 
+void my_swap_2d(celltype*** a, celltype*** b);
+
 void draw_img(celltype** univ, pixel_t** img, size_t nrows, size_t ncols);
 
 void fprint_self(FILE* out_file, celltype** univ, size_t nrows, size_t ncols);
@@ -53,14 +66,17 @@ void fprint_univ(MPI_File out_file, celltype** univ, size_t nrows, size_t ncols)
 
 void fprint_pixels(MPI_File out_file, pixel_t** img, size_t nrows, size_t ncols);
 
+void* play_gol_pthreads(void *data);
+
 /** Play one tick of a game of life serially with given array of known number
  *  of rows and columns. Assumed that rows wrap around, but first and last
  *  rows are ghosted.
  */
 void play_gol(celltype** univ, size_t nrows, size_t ncols);
+void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols);
 
 /** Play one tick of the game of life using MPI */
-void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick);
+void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncols, size_t tick);
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -73,7 +89,7 @@ int main(int argc, char *argv[])
   size_t nirows;
   size_t nicols;
   size_t tick;
-  celltype **univ;
+  celltype **univ, **univ_new;
   pixel_t **img;
   FILE *out_file = NULL;
   MPI_File mpi_out_fh;
@@ -124,6 +140,13 @@ int main(int argc, char *argv[])
 	univ[i] = (*univ + ncols * i);
       }
 
+      univ_new  = (celltype **)malloc(sizeof(celltype *) *(nrows+2));
+      univ_new[0] = (celltype *)malloc(sizeof(celltype) * ncols *(nrows+2));
+
+      for(i = 0; i < (nrows+2); i++) {
+	univ_new[i] = (*univ_new + ncols * i);
+      }
+
       img = (pixel_t **) malloc(sizeof(pixel_t *) * (nirows+2));
       img[0] = (pixel_t *) malloc(sizeof(pixel_t) * nicols * nirows);
 
@@ -139,11 +162,12 @@ int main(int argc, char *argv[])
 	}
       }
 
-      for (tick = 0; tick < 32; ++tick) {
+      for (tick = 0; tick < NTICKS; ++tick) {
 	fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, tick);
 	fprint_self(out_file, univ, nrows, ncols);
 	/* TODO: play one tick */
-	play_gol_mpi(univ, nrows, ncols, tick);
+	play_gol_mpi(univ, univ_new, nrows, ncols, tick);
+	my_swap_2d(&univ, &univ_new);
       }
 
       fprint_univ(mpi_out_fh, univ, nrows, ncols);
@@ -170,6 +194,12 @@ int main(int argc, char *argv[])
 
 void my_swap(celltype** a, celltype** b) {
   celltype* temp = *a;
+  *a = *b;
+  *b = temp;
+}
+
+void my_swap_2d(celltype*** a, celltype*** b) {
+  celltype** temp = *a;
   *a = *b;
   *b = temp;
 }
@@ -230,6 +260,34 @@ void fprint_pixels(MPI_File out_file, pixel_t** img, size_t nrows, size_t ncols)
     MPI_File_write_at(out_file, mpi_myrank * nrows * ncols * sizeof(pixel_t), img[0], nrows * ncols, MPI_UNSIGNED_SHORT, &status);
 }
 
+void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols)
+{
+  size_t i, j;
+  celltype sum;
+  for (i = 0; i < nrows; ++i) {
+    for (j = 0; j < ncols; ++j) {
+      sum = (univ[i][(j+ncols-1)%ncols] + univ[i][j] + univ[i][(j+1)%ncols] +
+	     univ[i + 1][(j+ncols-1) % ncols] + univ[i + 1][(j+1) % ncols] +
+	     univ[i + 2][(j+ncols-1) % ncols] + univ[i + 2][j] + univ[i + 2][(j+1) % ncols]);
+      switch (sum) {
+      case 2:
+        /* Do nothing to the state */
+	univ_new[i+1][j] = univ[i+1][j];
+	break;
+      case 3:
+	/* Alive, either by reproduction or by survival */
+	univ_new[i+1][j] = ALIVE;
+	break;
+      default:
+	/* Dead, either by underpopulation (0--1 nbs) or overpopulation
+	   (4--8 nbs) */
+	univ_new[i+1][j] = DEAD;
+	break;
+      }
+    }
+  }
+}
+
 void play_gol(celltype** univ, size_t nrows, size_t ncols)
 {
   celltype *rowbackup, *lastrow, sum;
@@ -272,7 +330,24 @@ void play_gol(celltype** univ, size_t nrows, size_t ncols)
   free(lastrow);
 }
 
-void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick)
+void* play_gol_pthreads(void *data)
+{
+  struct datapack* data1 = (struct datapack *) data;
+  size_t i;
+  /* Thread is started. Go into ticks */
+  for (i = 0; i < NTICKS; ++i) {
+    if (0 == data1->tid) {
+      /* TODO: Do all the ghosting broughaha */
+    }
+    pthread_barrier_wait(&(data1->barrier));
+    play_gol(data1->univ, data1->nrows, data1->ncols);
+    pthread_barrier_wait(&(data1->barrier));
+  }
+
+  return NULL;
+}
+
+void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncols, size_t tick)
 {
   int mpi_myrank, mpi_commsize;
   /* up/down refers to direction of message */
@@ -311,5 +386,5 @@ void play_gol_mpi(celltype**univ, size_t nrows, size_t ncols, size_t tick)
   MPI_Wait(&recv_req_down, &recv_status_down);
   MPI_Wait(&send_req_up, &send_status_up);
   MPI_Wait(&send_req_down, &send_status_down);
-  play_gol(univ, nrows, ncols);
+  play_gol_2(univ, univ_new, nrows, ncols);
 }
