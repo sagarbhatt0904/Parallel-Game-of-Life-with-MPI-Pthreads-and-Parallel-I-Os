@@ -37,20 +37,21 @@ typedef unsigned short int pixel_t;
 /* Global Vars *************************************************************/
 /***************************************************************************/
 
+celltype** univ;
+celltype** univ_new;
+
 int mpi_myrank;
 int mpi_commsize;
+
+size_t nrows;
+size_t ncols;
 
 pthread_barrier_t barrier;
 
 FILE *out_file = NULL;
 
 struct datapack {
-  celltype** univ;
-  celltype** univ_new;
   size_t tid;
-  size_t nrows;
-  size_t ncols;
-  int mpi_myrank;
 };
 // You define these
 
@@ -60,8 +61,6 @@ struct datapack {
 /***************************************************************************/
 
 // You define these
-
-void my_swap(celltype** a, celltype** b);
 
 void my_swap_2d(celltype*** a, celltype*** b);
 
@@ -81,11 +80,7 @@ void* play_gol_pthreads(void *data);
  *  of rows and columns. Assumed that rows wrap around, but first and last
  *  rows are ghosted.
  */
-void play_gol(celltype** univ, size_t nrows, size_t ncols);
-void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols, size_t my_start_row);
-
-/** Play one tick of the game of life using MPI */
-void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncols, size_t tick);
+void play_gol(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols, size_t my_start_row);
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -93,13 +88,12 @@ void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncol
 
 int main(int argc, char *argv[])
 {
-  size_t nrows, ncols, i, j, thr;
+  size_t i, j, thr;
   size_t nirows;
   size_t nicols;
   /* size_t tick; */
   pthread_t my_threads[NUM_THREADS];
   struct datapack datapacks[NUM_THREADS];
-  celltype **univ, **univ_new;
   pixel_t **img;
   MPI_File mpi_out_fh;
   MPI_File mpi_img_fh;
@@ -182,14 +176,9 @@ int main(int argc, char *argv[])
       }
 
       for (thr = 0; thr < NUM_THREADS; ++thr) {
-	datapacks[thr].univ = univ;
-	datapacks[thr].univ_new = univ_new;
-	datapacks[thr].nrows = nrows;
-	datapacks[thr].ncols = ncols;
 	datapacks[thr].tid = thr;
-	datapacks[thr].mpi_myrank = mpi_myrank;
 	pthread_create(&my_threads[thr], NULL,
-		       (void *) play_gol_pthreads, &datapacks[thr]);
+		       play_gol_pthreads, (void *) &datapacks[thr]);
       }
 
       for (thr = 0; thr < NUM_THREADS; ++thr) {
@@ -201,7 +190,7 @@ int main(int argc, char *argv[])
       /* 	fprint_self(out_file, univ, nrows, ncols); */
       /* 	/\* TODO: play one tick *\/ */
       /* 	do_ghosting(univ, nrows, ncols, tick); */
-      /* 	play_gol_2(univ, univ_new, nrows, ncols, mpi_myrank * nrows); */
+      /* 	play_gol(univ, univ_new, nrows, ncols, mpi_myrank * nrows); */
       /* 	my_swap_2d(&univ, &univ_new); */
       /* } */
 
@@ -225,12 +214,6 @@ int main(int argc, char *argv[])
 /***************************************************************************/
 /* Other Functions - You write as part of the assignment********************/
 /***************************************************************************/
-
-void my_swap(celltype** a, celltype** b) {
-  celltype* temp = *a;
-  *a = *b;
-  *b = temp;
-}
 
 void my_swap_2d(celltype*** a, celltype*** b) {
   celltype** temp = *a;
@@ -294,7 +277,7 @@ void fprint_pixels(MPI_File out_file, pixel_t** img, size_t nrows, size_t ncols)
     MPI_File_write_at(out_file, mpi_myrank * nrows * ncols * sizeof(pixel_t), img[0], nrows * ncols, MPI_UNSIGNED_SHORT, &status);
 }
 
-void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols, size_t my_start_row)
+void play_gol(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols, size_t my_start_row)
 {
   size_t i, j;
   celltype sum;
@@ -326,72 +309,31 @@ void play_gol_2(celltype** univ, celltype** univ_new, size_t nrows, size_t ncols
   }
 }
 
-void play_gol(celltype** univ, size_t nrows, size_t ncols)
-{
-  celltype *rowbackup, *lastrow, sum;
-  rowbackup = (celltype *) malloc(ncols * sizeof(celltype));
-  lastrow = (celltype *) malloc(ncols * sizeof(celltype));
-  size_t i, j;
-  for (j = 0; j < ncols; ++j) {
-    lastrow[j] = univ[0][j];
-  }
-
-  for (i = 0; i < nrows; i++) {
-    for (j = 0; j < ncols; ++j) {
-      rowbackup[j] = univ[i+1][j];
-    }
-
-    for (j = 0; j < ncols; ++j) {
-      sum = (lastrow[(j-1)%ncols] + lastrow[j] + lastrow[(j+1)%ncols] +
-	     rowbackup[(j-1)%ncols] + rowbackup[(j+1)%ncols] +
-	     univ[i+2][(j-1)%ncols] + univ[i+2][j] + univ[i+2][(j+1)%ncols]);
-      switch (sum) {
-      case 2:
-        /* Do nothing to the state */
-	break;
-      case 3:
-	/* Alive, either by reproduction or by survival */
-	univ[i+1][j] = ALIVE;
-	break;
-      default:
-	/* Dead, either by underpopulation (0--1 nbs) or overpopulation
-	   (4--8 nbs) */
-	univ[i+1][j] = DEAD;
-	break;
-      }
-    }
-
-    my_swap(&lastrow, &rowbackup);
-  }
-
-  free(rowbackup);
-  free(lastrow);
-}
-
 void* play_gol_pthreads(void *data)
 {
   struct datapack* data1 = (struct datapack *) data;
   int rc;
   size_t i;
-  size_t ntrows = data1->nrows / NUM_THREADS;
+  size_t ntrows = nrows / NUM_THREADS;
   size_t start_row = ntrows * data1->tid;
-  size_t true_start_row = data1->nrows * data1->mpi_myrank + start_row;
+  size_t true_start_row = nrows * mpi_myrank + start_row;
   /* Thread is started. Go into ticks */
   for (i = 0; i < NTICKS; ++i) {
     rc = pthread_barrier_wait(&barrier);
     if (PTHREAD_BARRIER_SERIAL_THREAD == rc) {
-      fprintf(out_file, "Rank %d, tick %ld:\n", data1->mpi_myrank, i);
-      fprint_self(out_file, data1->univ, data1->nrows, data1->ncols);
+      fprintf(out_file, "Rank %d, tick %ld:\n", mpi_myrank, i);
+      fprint_self(out_file, univ, nrows, ncols);
       /* TODO: Do all the ghosting broughaha */
-      do_ghosting(data1->univ, data1->nrows, data1->ncols, i);
+      do_ghosting(univ, nrows, ncols, i);
     }
+    printf("rank %d, thread %ld tick %ld\n", mpi_myrank, data1->tid, i);
     rc = pthread_barrier_wait(&(barrier));
 
-    play_gol_2(&(data1->univ[start_row]), &(data1->univ_new[start_row]), ntrows, data1->ncols, true_start_row);
+    play_gol(&(univ[start_row]), &(univ_new[start_row]), ntrows, ncols, true_start_row);
 
     rc = pthread_barrier_wait(&(barrier));
     if (PTHREAD_BARRIER_SERIAL_THREAD == rc) {
-      my_swap_2d(&(data1->univ), &(data1->univ_new));
+      my_swap_2d(&(univ), &(univ_new));
     }
   }
 
@@ -437,46 +379,4 @@ void do_ghosting(celltype **univ, size_t nrows, size_t ncols, size_t tick)
   MPI_Wait(&recv_req_down, &recv_status_down);
   MPI_Wait(&send_req_up, &send_status_up);
   MPI_Wait(&send_req_down, &send_status_down);
-}
-
-void play_gol_mpi(celltype**univ, celltype** univ_new, size_t nrows, size_t ncols, size_t tick)
-{
-  int mpi_myrank, mpi_commsize;
-  /* up/down refers to direction of message */
-  MPI_Request recv_req_up, recv_req_down,
-    send_req_up, send_req_down;
-  MPI_Status recv_status_up, recv_status_down,
-    send_status_up, send_status_down;
-  int up_tag = 2*tick, down_tag = 2*tick+1;
-  int rank_above, rank_below;
-
-  MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
-  MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
-
-  /* Simply (mpi_myrank-1)%mpi_commsize gives -1 for rank 0.
-     Even GDB can't help! */
-  rank_above = (mpi_myrank+mpi_commsize-1)%mpi_commsize;
-  rank_below = (mpi_myrank+1)%mpi_commsize;
-  /* TODO: Request ghosts */
-  MPI_Irecv(univ[nrows+1], ncols, MPI_UNSIGNED_SHORT,
-	    rank_below, up_tag, MPI_COMM_WORLD,
-	    &recv_req_up);
-  MPI_Irecv(univ[0], ncols, MPI_UNSIGNED_SHORT,
-	    rank_above, down_tag, MPI_COMM_WORLD,
-	    &recv_req_down);
-
-  /* TODO: Send shosts */
-  MPI_Isend(univ[1], ncols, MPI_UNSIGNED_SHORT,
-	    rank_above, up_tag, MPI_COMM_WORLD,
-	    &send_req_up);
-  MPI_Isend(univ[nrows], ncols, MPI_UNSIGNED_SHORT,
-	    rank_below, down_tag, MPI_COMM_WORLD,
-	    &send_req_down);
-
-  /* TODO: Play the game */
-  MPI_Wait(&recv_req_up, &recv_status_up);
-  MPI_Wait(&recv_req_down, &recv_status_down);
-  MPI_Wait(&send_req_up, &send_status_up);
-  MPI_Wait(&send_req_down, &send_status_down);
-  play_gol_2(univ, univ_new, nrows, ncols, mpi_myrank*nrows);
 }
