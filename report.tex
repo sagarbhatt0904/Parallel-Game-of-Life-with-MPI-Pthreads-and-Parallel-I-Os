@@ -1,0 +1,58 @@
+% Created 2018-04-25 Wed 21:22
+\documentclass[letter,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{fixltx2e}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{marvosym}
+\usepackage{wasysym}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\tolerance=1000
+\usepackage{listings} \usepackage{fullpage} \usepackage{color} \usepackage{siunitx}
+\author{Ajinkya Dahale, Sagar Bhatt}
+\date{\today}
+\title{CSCI 6360: Assignment 4/5 \\ Game of Life with Randomness}
+\hypersetup{
+  pdfkeywords={},
+  pdfsubject={},
+  pdfcreator={Emacs 25.3.1 (Org mode 8.2.10)}}
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+\label{sec-1}
+
+The task in this assignment was to implement Conway's game of life, but with randomness attached to it, using MPI, Pthreads and parallel I/O combined. Not only was the intial state randomized, randomization was used at each step for every cell, such that if a random number picked for the cell was less than a prescribed threshold, instead of computing it's state using the rules of the game, the state will be randomly assigned as either DEAD or ALIVE.
+
+A "CLCG4" RNG algorithm was provided for the assignment, along with a template.
+
+\section{Implementation}
+\label{sec-2}
+
+\begin{itemize}
+\item Serial level: We begin our description of implementation with the innermost serial level code algorithm. The function \verb~play_gol~ plays exactly one tick (time step) of our run, and uses two 2D arrays \verb~univ~ and \verb~univ_new~ for it's operation (note that this will be different than the rank's array's by the same name when there are more than one threads). The former is the reference copy which is not (to be) changed within the function, while the latter is the blank slate to be written on. At the end of the tick, these arrays are simply switched for the next tick (though this happens only ). An additional argument describing the RNG stream to use is also passed.
+
+This is not the most memory-efficient algorithm, but it is very simple (embarassingly parallel, even) and guarantees zero race conditions provided \verb~univ~ is not edited. An alternative algorithm where only the upper and lower "ghost" rows are backed up adds far too much complexity to an already complicated program, but it can be used if we start running out of memory.
+\item Pthreads level: Each rank generates the given number of threads (0 pthreads case is treated as 1 pthread), which each go into the ticks for loop. At each tick, the threads perform ghosting, call \verb~play_gol~ (desribed above) specifying just the relevant part of \verb~univ~ and \verb~univ_new~, and perform the swap, with a barrier between them. Of these, only the call to \verb~play_gol~ is done by all threads, while ghosting and swaps are performed by a single thread (specified by a nonzero return from \verb~pthread_barrier_wait~).
+\item MPI level: The only relevant MPI-level operation apart from I/O is ghosting. This is done by a 2 pairs of \textasciitilde{}MPI$_{\text{Isend}}$\textasciitilde{}s and
+\item Times considered
+\item I/O
+\item Endianness
+\end{itemize}
+
+\section{Results and Discussions}
+\label{sec-3}
+\begin{itemize}
+\item 
+\end{itemize}
+% Emacs 25.3.1 (Org mode 8.2.10)
+\end{document}

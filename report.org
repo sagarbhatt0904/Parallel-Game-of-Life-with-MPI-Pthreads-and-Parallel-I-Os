@@ -1,0 +1,25 @@
+#+TITLE: CSCI 6360: Assignment 4/5 \\ Game of Life with Randomness
+#+AUTHOR: Ajinkya Dahale, Sagar Bhatt
+#+LaTeX_HEADER: \usepackage{listings} \usepackage{fullpage} \usepackage{color} \usepackage{siunitx}
+#+LaTeX_CLASS_OPTIONS: [letter,11pt] 
+#+OPTIONS: toc:nil
+
+* Introduction
+  
+  The task in this assignment was to implement Conway's game of life, but with randomness attached to it, using MPI, Pthreads and parallel I/O combined. Not only was the intial state randomized, randomization was used at each step for every cell, such that if a random number picked for the cell was less than a prescribed threshold, instead of computing it's state using the rules of the game, the state will be randomly assigned as either DEAD or ALIVE.
+
+  A "CLCG4" RNG algorithm was provided for the assignment, along with a template.
+
+* Implementation
+  
+  - Serial level: We begin our description of implementation with the innermost serial level code algorithm. The function ~play_gol~ plays exactly one tick (time step) of our run, and uses two 2D arrays ~univ~ and ~univ_new~ for it's operation (note that this will be different than the rank's array's by the same name when there are more than one threads). The former is the reference copy which is not (to be) changed within the function, while the latter is the blank slate to be written on. At the end of the tick, these arrays are simply switched for the next tick (though this happens only ). An additional argument describing the RNG stream to use is also passed.
+
+    This is not the most memory-efficient algorithm, but it is very simple (embarassingly parallel, even) and guarantees zero race conditions provided ~univ~ is not edited. An alternative algorithm where only the upper and lower "ghost" rows are backed up adds far too much complexity to an already complicated program, but it can be used if we start running out of memory. 
+  - Pthreads level: Each rank generates the given number of threads (0 pthreads case is treated as 1 pthread), which each go into the ticks for loop. At each tick, the threads perform ghosting, call ~play_gol~ (desribed above) specifying just the relevant part of ~univ~ and ~univ_new~, and perform the swap, with a barrier between them. Of these, only the call to ~play_gol~ is done by all threads, while ghosting and swaps are performed by a single thread (specified by a nonzero return from ~pthread_barrier_wait~). 
+  - MPI level: The only relevant MPI-level operation apart from I/O is ghosting. This is done by a 2 pairs of ~MPI_Isend~'s and ~MPI_Irecv~'s per rank, one downward and one upward. To avoid any chance that ranks receive rows from a different time step, tags $2t$ and $2t+1$ were used for upward and downward message passes, respectively, $t$ being the tick number. 
+  - I/O: IO was performed using MPI-IO, specifically the ~
+  - Times considered
+  - Endianness
+
+* Results and Discussions
+  - 
