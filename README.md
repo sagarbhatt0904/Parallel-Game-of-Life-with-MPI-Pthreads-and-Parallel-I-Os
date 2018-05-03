@@ -8,4 +8,4 @@
 
 ###### To Run:
 * `mpirun -n <np> ./assignment4-5`
-* User will need to change number of `pthreads` needs to be changed in assignment4-5.c if different thread count is required
+* User will need to change number of `pthreads` in assignment4-5.c if different thread count is required
