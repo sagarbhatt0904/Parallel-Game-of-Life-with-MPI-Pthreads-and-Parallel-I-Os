@@ -2,10 +2,10 @@
 
 #### Team Members: Ajinkya Dahale, Sagar Bhatt
 
-######To Compile:
+###### To Compile:
 * On BG/Q: `make bgq`
 * On All other Systems: `make all`
 
-######To Run:
+###### To Run:
 * `mpirun -n <np> ./assignment4-5`
 * User will need to change number of `pthreads` needs to be changed in assignment4-5.c if different thread count is required
