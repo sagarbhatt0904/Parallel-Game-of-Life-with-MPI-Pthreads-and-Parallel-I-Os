@@ -1,4 +1,4 @@
-# This repo is for sharing the code/tex report for the assignment
+# This repo is for sharing the code for an assignment for the course Parallel Computing
 
 #### Team Members: Ajinkya Dahale, Sagar Bhatt
 
